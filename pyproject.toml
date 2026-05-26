@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stream-ser-open"
+version = "0.1.0"
+description = "Anonymous streaming emotion recognition artifact with fast axis, trigger, and slow axis."
+requires-python = ">=3.9"
+dependencies = [
+  "torch",
+  "transformers",
+  "peft",
+  "numpy",
+  "scikit-learn",
+  "joblib",
+  "av",
+  "librosa",
+  "pillow",
+  "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

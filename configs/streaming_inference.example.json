@@ -1,0 +1,16 @@
+{
+  "input_jsonl": "/path/to/test.jsonl",
+  "output_jsonl": "/path/to/predictions.jsonl",
+  "fast_model_path": "/path/to/qwen-omni",
+  "fast_adapter_path": "/path/to/fast-lora",
+  "slow_model_path": "/path/to/qwen-omni",
+  "slow_adapter_path": "/path/to/slow-lora",
+  "trigger_model_path": "/path/to/router_rf.joblib",
+  "trigger_threshold": 0.5,
+  "trigger_decision_mode": "auto",
+  "labels": "neutral,anger,anxiety,sadness,joy,surprise,embarrassment",
+  "video_key": "video_path",
+  "stream_key": "stream_id",
+  "step_key": "step",
+  "summary_key": "prev_summary"
+}

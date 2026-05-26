@@ -1,0 +1,2 @@
+{"stream_id":"demo_dialog_001::speaker_a","step":0,"video_path":"/path/to/clip_000.mp4","dialogue":"I did not expect that to happen.","prev_summary":"","gt_emotion":"surprise"}
+{"stream_id":"demo_dialog_001::speaker_a","step":1,"video_path":"/path/to/clip_001.mp4","dialogue":"No, it is fine. Really.","prev_summary":"The speaker was surprised by new information.","gt_emotion":"embarrassment"}
