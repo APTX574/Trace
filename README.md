@@ -1,10 +1,5 @@
 # Streaming SER Open Artifact
 
-This directory is an anonymized, self-contained release layout for the streaming
-speech/video emotion recognition system. It keeps the paper-facing components
-together and removes local absolute paths, private experiment names, cached
-checkpoints, and dataset-specific scratch scripts from the original workspace.
-
 ## Structure
 
 ```text
