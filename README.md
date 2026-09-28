@@ -51,8 +51,7 @@ pip install -e .
 Then prepare the pieces the commands below expect:
 
 - **Base model** — `Qwen2.5-Omni`: the fast axis loads `Qwen2.5-Omni-3B` (thinker), the slow axis loads `Qwen2.5-Omni-7B` (thinker), together with the matching `qwen_omni_utils`.
-- **Fast adapter** — the released `fast_lora_adapter.zip` bundle.
-- **Slow adapter** — the released `slow_lora_adapter.zip` bundle. It is trained with previous/current context and returns JSON `final_emotion / reason / new_summary`.
+- **Checkpoints** — [Trace-checkpoints.zip](https://drive.google.com/file/d/1Onorc5Z-C754C-x6uVyyw2gOLZO3Md5y/view?usp=sharing) bundles the two released LoRA adapters: `fast_prefix_audio_frame_lora` (base `Qwen2.5-Omni-3B/thinker`) and `slow_track_lora` (base `Qwen2.5-Omni-7B/thinker`). Unzip it and point `--adapter-path` at the matching directory — the fast axis takes the first, the slow axis the second. The slow adapter is trained with previous/current context and returns JSON `final_emotion / reason / new_summary`.
 - **Trigger bundle** — optional; produced by `scripts/train_dual_head_trigger.py`. Without it the online path falls back to a rule trigger.
 - **Clips** — JSONL `video_path` values are resolved against `--video-root`, so clips stay wherever you keep them locally.
 
@@ -65,7 +64,7 @@ Then prepare the pieces the commands below expect:
 ```bash
 PYTHONPATH=src python scripts/run_fast_prefix_belief.py \
   --model-path /path/to/qwen-omni-3b \
-  --adapter-path /path/to/fast_lora_adapter/fast_prefix_audio_frame_lora \
+  --adapter-path /path/to/Trace-checkpoints/fast_prefix_audio_frame_lora \
   --input-jsonl test.jsonl \
   --video-root /path/to/Friends/clips \
   --output-jsonl prefix_predictions.jsonl \
@@ -79,7 +78,7 @@ Audio prefixes are cut straight from the clips at 16 kHz, starting at 1.5 s with
 ```bash
 PYTHONPATH=src python scripts/run_slow_batch.py \
   --model-path /path/to/qwen-omni-7b \
-  --adapter-path /path/to/slow_lora_adapter/slow_track_lora \
+  --adapter-path /path/to/Trace-checkpoints/slow_track_lora \
   --input-jsonl test.jsonl \
   --trajectory-jsonl prefix_predictions.jsonl \
   --video-root /path/to/Friends/clips \
