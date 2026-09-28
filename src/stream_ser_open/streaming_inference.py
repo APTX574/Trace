@@ -93,21 +93,29 @@ def _extract_local_summary(sample: Dict[str, Any], summary_key: str) -> str:
 
 
 def _normalize_slow_result(parsed: Dict[str, Any], fast_pred: str, labels: List[str], default_label: str) -> Dict[str, Any]:
-    corrected = canonicalize_prediction(parsed.get("corrected_emotion", fast_pred), labels, fast_pred or default_label)
-    need = int(str(parsed.get("need_correction", "0")).strip() in {"1", "true", "True", "yes"})
-    if corrected == fast_pred:
-        need = 0
-    final = corrected if need else fast_pred
+    """Align the slow-axis JSON with the paper's reinterpretation output
+    (final_emotion, reason, new_summary). ``corrected_emotion`` and
+    ``need_correction`` are accepted as legacy fallbacks only."""
+    corrected = canonicalize_prediction(
+        parsed.get("final_emotion") or parsed.get("corrected_emotion") or fast_pred,
+        labels,
+        fast_pred or default_label,
+    )
+    need = int(
+        str(parsed.get("need_correction", "")).strip() in {"1", "true", "True", "yes"}
+        or (corrected != fast_pred)
+    )
+    final = corrected
     delta = str(parsed.get("correction_delta", "")).strip()
     if not delta:
         delta = f"{fast_pred}->{corrected}" if need else "none"
-    if not need:
-        delta = "none"
     return {
         "need_correction": need,
         "corrected_emotion": corrected,
         "correction_delta": delta,
         "final_emotion": final,
+        "reason": first_text([parsed.get("reason")]),
+        "new_summary": first_text([parsed.get("new_summary")]),
     }
 
 

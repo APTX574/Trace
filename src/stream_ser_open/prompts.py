@@ -66,8 +66,10 @@ def build_slow_prompt(state: Dict[str, Any], labels: List[str]) -> str:
         parts.append(f'Previous summary: "{summary}".')
     parts.append(
         "Return strict JSON with keys: "
-        "need_correction, corrected_emotion, correction_delta, new_summary. "
-        "Use correction_delta='none' when no correction is needed."
+        "final_emotion, reason, new_summary. "
+        "final_emotion must be one label from the valid set. "
+        "reason is a brief rationale grounded in the current audiovisual and dialogue evidence. "
+        "new_summary is a concise summary of the current clip for updating dialogue memory."
     )
     return "\n".join(parts)
 

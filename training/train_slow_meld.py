@@ -237,7 +237,7 @@ def resolve_dialogue_turn_index(sample: Dict[str, Any], video_key: str) -> Optio
                 return int(value)
             except Exception:
                 continue
-        for key in ["global_turn_index", "turn_index"]:
+        for key in ["global_turn_index", "turn_index", "step"]:
             value = source.get(key, None)
             if value is None:
                 continue
