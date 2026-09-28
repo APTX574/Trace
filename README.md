@@ -10,20 +10,18 @@ Official open-source release for the paper
 >
 > Paper: <https://arxiv.org/abs/2608.26786>
 
-This repository provides the streaming **TRA**jectory-aware **C**ontrastive-r**E**liability
-(TRACE) framework for streaming video emotion understanding: a low-latency audio-prefix
-belief tracker, a trajectory-calibrated reliability trigger, and a selectively invoked
-contextual reinterpretation (slow axis).
+TRACE runs streaming video emotion understanding with three components working together:
 
-There are two supported lines of use:
+- **Fast axis** — a low-latency belief tracker that scores every emotion label from the audio prefix.
+- **Trajectory-calibrated trigger** — reads the prefix belief trajectory and decides whether the fast axis can be committed to.
+- **Slow axis** — a contextual reinterpretation model that is invoked only when the trigger asks for it.
 
-- **Offline reproduction** — regenerate the paper's main tables from the released
-  checkpoints (fast LoRA, slow LoRA) and the released annotations.
-- **Online inference** — run TRACE on a streaming clip in real time.
+The repository supports two ways of running the framework:
 
----
+- **Offline pipeline** — batch a JSONL of clips through the fast axis, the slow axis and the routing evaluation.
+- **Online inference** — drive TRACE as a streaming loop over incoming clips.
 
-## Structure
+## Repository layout
 
 ```text
 Trace/
@@ -32,49 +30,37 @@ Trace/
   scripts/
     run_fast_prefix_belief.py   Offline step 1: per-prefix fast belief trajectory
     run_slow_batch.py           Offline step 2: slow-axis (reinterpretation) batch
-    evaluate_trace.py           Offline step 4: streaming-strategy evaluation table
+    evaluate_trace.py           Offline step 3: streaming-strategy evaluation table
+    run_streaming_inference.py  Online streaming inference entry point
     train_dual_head_trigger.py  Train the trajectory-calibrated trigger
     train_trigger_router.py     Single-head router baseline (optional)
-    run_streaming_inference.py  Online streaming inference entry point
     train_fast_axis.sh          Fast-axis LoRA training launcher
     train_slow_axis.sh          Slow-axis LoRA training launcher
   src/stream_ser_open/        Reusable implementation
   training/                   Fast-axis and slow-axis LoRA training code
 ```
 
-## What you need to reproduce
+## Setup
 
-- **Base model**: `Qwen2.5-Omni` (fast axis uses `Qwen2.5-Omni-3B/thinker`,
-  slow axis uses `Qwen2.5-Omni-7B/thinker`), plus the matching `qwen_omni_utils`.
-- **Fast checkpoint**: the released `fast_lora_adapter.zip` LoRA bundle.
-- **Slow checkpoint**: the released `slow_lora_adapter.zip` LoRA bundle
-  (trained with previous/current context, JSON output
-  `final_emotion / reason / new_summary`).
-- **Data**: StreamMER annotations are shipped in `test.jsonl` (all paths are
-  relative to your locally obtained Friends S1–S2 clips). Original videos are
-  copyright-protected and must be obtained lawfully (see the paper's dataset
-  appendix). For MELD / MER2024, use the official public data.
+Install the package:
 
-> Note: the released `test.jsonl` labels are the authoritative test set; any
-> discrepancy with the table in the paper draft is a typesetting issue in the
-> draft, not in the data.
->
-> No audio cache is required. Audio prefixes are extracted directly from the
-> clips at 16 kHz (same as the paper pipeline); the pre-extracted audio cache is
-> only used when provided via `--prefix-cache-dir` for bit-exact reproduction.
-> Without it, borderline-prefix predictions may flip on a few samples due to
-> av container-duration rounding, while overall accuracy stays within ~2 pt of
-> the reported numbers.
+```bash
+pip install -e .
+```
 
----
+Then prepare the pieces the commands below expect:
 
-## Offline reproduction
+- **Base model** — `Qwen2.5-Omni`: the fast axis loads `Qwen2.5-Omni-3B` (thinker), the slow axis loads `Qwen2.5-Omni-7B` (thinker), together with the matching `qwen_omni_utils`.
+- **Fast adapter** — the released `fast_lora_adapter.zip` bundle.
+- **Slow adapter** — the released `slow_lora_adapter.zip` bundle. It is trained with previous/current context and returns JSON `final_emotion / reason / new_summary`.
+- **Trigger bundle** — optional; produced by `scripts/train_dual_head_trigger.py`. Without it the online path falls back to a rule trigger.
+- **Clips** — JSONL `video_path` values are resolved against `--video-root`, so clips stay wherever you keep them locally.
 
-The reported streaming-strategy numbers come from running the fast axis per
-prefix, the slow axis selectively, and then evaluating routing strategies
-offline. The commands below reproduce the main table.
+`test.jsonl` ships the StreamMER annotations with all stream fields filled in, and works as `--input-jsonl` for every command below.
 
-### Step 1 — fast-axis per-prefix belief trajectories
+## Offline pipeline
+
+### Step 1 — fast-axis per-prefix beliefs
 
 ```bash
 PYTHONPATH=src python scripts/run_fast_prefix_belief.py \
@@ -86,9 +72,7 @@ PYTHONPATH=src python scripts/run_fast_prefix_belief.py \
   --include-dialogue false
 ```
 
-This writes one record per audio prefix (1.5 s start, 1.0 s stride, plus the
-full clip) with `pred_label`, `confidence`, `entropy`, `margin`, `gold_prob`,
-and the label `probabilities`.
+Audio prefixes are cut straight from the clips at 16 kHz, starting at 1.5 s with a 1.0 s stride (`--min-prefix-sec`, `--prefix-step-sec`), plus the full clip. Each record carries `pred_label`, `confidence`, `entropy`, `margin`, `gold_prob` and the per-label `probabilities`. Pass `--prefix-cache-dir` to read pre-extracted 1.5 s prefixes instead of cutting them again.
 
 ### Step 2 — slow-axis reinterpretation outputs
 
@@ -102,59 +86,29 @@ PYTHONPATH=src python scripts/run_slow_batch.py \
   --output-jsonl slow_outputs.jsonl
 ```
 
-The slow model receives the previous-context audio, the current target audio,
-and the current target video (2 fps, 448 long side, audio-in-video), and
-returns `final_emotion / reason / new_summary`.
+The slow model receives the previous-context audio, the current target audio and the current target video (2 fps, resolution capped by `--max-pixels`, audio-in-video) and returns `final_emotion / reason / new_summary`. `--trajectory-jsonl` merges the fast forecast into each slow prompt.
 
-### Step 3 — train the trajectory-calibrated trigger (optional)
-
-On the StreamMER train split, generate out-of-fold fast trajectories and slow
-outputs first, then
-
-```bash
-PYTHONPATH=src python scripts/train_dual_head_trigger.py \
-  --train-trajectory-jsonl /path/to/train_trajectory.jsonl \
-  --train-slow-jsonl /path/to/train_slow.jsonl \
-  --eval-trajectory-jsonl prefix_predictions.jsonl \
-  --eval-slow-jsonl slow_outputs.jsonl \
-  --output-dir dual_head_trigger_out \
-  --decision-mode threshold
-```
-
-Use the threshold grid to pick the operating point at reinterpretation rate
-**RR ≈ 55.6%** (the paper's TRACE operating point). The training script's
-`threshold_search.csv` also reports accuracy per RR.
-
-### Step 4 — evaluation table
+### Step 3 — strategy evaluation
 
 ```bash
 PYTHONPATH=src python scripts/evaluate_trace.py \
   --trajectory-jsonl prefix_predictions.jsonl \
   --slow-jsonl slow_outputs.jsonl \
-  --output-dir eval_out \
-  --commit-conf 0.75 --commit-margin 0.50 --commit-entropy 0.75 \
-  --slow-conf 0.70 --slow-margin 0.40 --slow-entropy 0.90 \
-  --near-full-ratio 0.90
+  --output-dir eval_out
 ```
 
-Outputs `strategy_delay_metrics_mapped7.csv` with Accuracy / Weighted-F1 /
-Macro-F1 / avg decision time / normalized decision ratio / slow call rate for
-`fast_only_first_1p5`, `always_full_fast`, `early_commit_wait_full`,
-`invoke_slow_when_needed`, `oracle_slow_trigger`, `slow_only` — matching the
-paper's Table 2 columns.
+Writes `eval_out/strategy_delay_metrics_mapped7.csv`, one row per routing strategy (`fast_only_first_1p5`, `always_full_fast`, `early_commit_wait_full`, `invoke_slow_when_needed`, `oracle_slow_trigger`, `slow_only`) with Accuracy, Weighted-F1, Macro-F1, average decision time, normalized decision ratio and slow call rate.
 
----
+The routing thresholds are all flags; the defaults are `--commit-conf 0.75`, `--commit-margin 0.50`, `--commit-entropy 0.75`, `--slow-conf 0.70`, `--slow-margin 0.40`, `--slow-entropy 0.90`, `--near-full-ratio 0.90`. Use `--target-space mapped7` (default) or `--target-space meld_raw` to pick the label space.
 
 ## Online inference
 
-The online path keeps stable samples on the low-latency fast axis and invokes
-the slow axis only when the trajectory-calibrated trigger judges the belief
-unreliable:
+The online loop keeps stable clips on the fast axis and calls the slow axis only when the trigger judges the prefix belief unreliable:
 
-1. Fast axis scores all emotion labels for the current streaming prefix.
-2. The trigger predicts fast-axis risk and expected slow-axis gain.
-3. Slow axis is invoked only when triggered.
-4. Final emotion and optional summary update the per-stream memory.
+1. The fast axis scores all emotion labels for the current streaming prefix.
+2. The trigger predicts fast-axis risk and the expected gain from invoking the slow axis.
+3. The slow axis runs only when it is triggered.
+4. The final emotion and the new summary update the per-stream memory.
 
 ```bash
 PYTHONPATH=src python scripts/run_streaming_inference.py \
@@ -167,24 +121,16 @@ PYTHONPATH=src python scripts/run_streaming_inference.py \
   --trigger-model-path /path/to/dual_head_trigger.joblib
 ```
 
-If `--trigger-model-path` is a `dual_head_trigger.joblib`, inference uses the
-paper-style two-head trigger:
+Trigger behaviour:
 
-- risk head estimates P(fast axis is wrong);
-- gain head estimates the expected improvement from invoking the slow axis.
+- **No `--trigger-model-path`** — a rule trigger fires on low confidence, low margin, high entropy or an unstable recent label history (`--rule-min-confidence`, `--rule-min-margin`, `--rule-max-entropy`, `--history-size`).
+- **`dual_head_trigger.joblib`** — the risk head estimates P(fast axis is wrong) and the gain head estimates the expected improvement from the slow axis; both must pass their saved thresholds. `--trigger-decision-mode` chooses between `threshold` routing, the `linear` decision head over `[risk, gain]`, and `auto` (keep the bundle default).
 
-By default the slow axis is invoked when both risk and gain pass the saved
-thresholds. Select the linear decision layer over `[risk, gain]` with
-`--trigger-decision-mode linear`, or keep the bundle default with
-`--trigger-decision-mode auto`. If `--trigger-model-path` is omitted, a rule
-trigger (low confidence, low margin, high entropy, unstable recent labels) is
-used.
+Other knobs: `--stream-key` / `--step-key` / `--start-key` / `--summary-key` for JSONL field names, `--include-summary` and `--summary-history-size` to control the running memory, `--fps` / `--max-pixels` / `--use-audio-in-video` for the video path, and `--fast-device` / `--slow-device` for placement.
 
----
+## Training (optional)
 
-## Training the released checkpoints
-
-### Fast Axis
+### Fast axis
 
 The fast axis is trained with prefix audio/frame supervision:
 
@@ -196,14 +142,11 @@ bash scripts/train_fast_axis.sh \
   --output-dir /path/to/outputs/fast_axis
 ```
 
-See `configs/train_fast_axis.example.sh` for the full command template.
-Note: keep batch size 1 for the per-prefix inference/scoring path; batched
-scoring is not supported.
+See `configs/train_fast_axis.example.sh` for the full command; the launcher runs `training/train_fast_1s.py`, and `training/train_fast_track.py` is the track-style variant. Keep batch size 1 on the per-prefix scoring path; batched scoring is not supported.
 
-### Slow Axis
+### Slow axis
 
-The slow axis trains a context-aware multimodal LoRA model. The default open
-configuration uses previous/current (and optionally next) context:
+The slow axis trains a context-aware multimodal LoRA model on previous/current (and optionally next) context:
 
 ```bash
 bash scripts/train_slow_axis.sh \
@@ -214,46 +157,44 @@ bash scripts/train_slow_axis.sh \
   --output-dir /path/to/outputs/slow_axis
 ```
 
-See `configs/train_slow_axis.example.sh`.
+See `configs/train_slow_axis.example.sh`; the launcher runs `training/train_slow_meld.py`, and `training/train_slow_track.py` is the track-style variant.
 
-### Dual-Head Trigger
+### Trigger
 
-Train the risk/gain trigger from fast prefix trajectories and slow-axis outputs
-as described in Step 3 above. A single-head baseline router is also available
-as `scripts/train_trigger_router.py`.
+Train the risk/gain trigger from fast trajectories and slow outputs collected on the train split (the two offline scripts pointed at `train.jsonl`):
 
----
+```bash
+PYTHONPATH=src python scripts/train_dual_head_trigger.py \
+  --train-trajectory-jsonl /path/to/train_trajectory.jsonl \
+  --train-slow-jsonl /path/to/train_slow.jsonl \
+  --eval-trajectory-jsonl prefix_predictions.jsonl \
+  --eval-slow-jsonl slow_outputs.jsonl \
+  --output-dir dual_head_trigger_out
+```
 
-## Input JSONL Schema
+`threshold_search.csv` in the output directory lists accuracy per reinterpretation rate (RR), so an operating point can be picked at a target RR. `scripts/train_trigger_router.py` is a single-head router baseline.
+
+## Input JSONL schema
 
 Required for evaluation:
 
-- `video_path`: relative clip path (when `--video-root` is given, the root is
-  prepended).
+- `video_path` — relative clip path; when `--video-root` is given the root is prepended.
 
 Required for training / context resolution (stream info):
 
-- `clip_id` (or `group_id`): scene/dialogue id used to group turns.
-- `step` (or `start_time`): temporal order of the utterance inside the clip.
-- `stream_id`: conversation or speaker stream id.
+- `clip_id` (or `group_id`) — scene/dialogue id used to group turns.
+- `step` (or `start_time`) — temporal order of the utterance inside the clip.
+- `stream_id` — conversation or speaker stream id.
 
 Recommended:
 
-- `dialogue` or `text`: transcript for the current clip.
-- `prev_summary`: previous local or running context (may be several clauses
-  joined by ` | ` when accumulated across the conversation).
-- `gt_emotion`, `emotion`, or `target`: label for evaluation.
+- `dialogue` or `text` — transcript for the current clip.
+- `prev_summary` — previous local or running context, which may be several clauses joined by ` | ` when accumulated across a conversation.
+- `gt_emotion`, `emotion` or `target` — label for evaluation.
 
-See `examples/sample_input.jsonl`. The released `test.jsonl` contains all of
-the required stream fields.
+See `examples/sample_input.jsonl`; `test.jsonl` contains all of the required stream fields.
 
----
+## Notes
 
-## Dependencies
-
-```bash
-pip install -e .
-```
-
-Qwen2.5-Omni also requires the matching `qwen_omni_utils` package/module from
-the official model release environment.
+- `Qwen2.5-Omni` also requires the matching `qwen_omni_utils` package/module from the official model release environment.
+- Original clips are copyright-protected; obtain them lawfully. For MELD / MER2024, use the official public data.
