@@ -30,7 +30,10 @@ def resolve_dtype(device: torch.device) -> torch.dtype:
 
 
 def load_qwen_omni(model_path: str, adapter_path: str, device: torch.device) -> Tuple[Qwen2_5OmniProcessor, torch.nn.Module]:
-    processor_source = adapter_path if adapter_path else model_path
+    # Some adapter bundles carry their own processor files (preprocessor_config,
+    # tokenizer); bare LoRA checkpoints (adapter_config + adapter_model only) do
+    # not. Fall back to the base model directory for the processor in that case.
+    processor_source = adapter_path if adapter_path and Path(adapter_path, "preprocessor_config.json").exists() else model_path
     processor = Qwen2_5OmniProcessor.from_pretrained(processor_source, trust_remote_code=True)
     base = Qwen2_5OmniForConditionalGeneration.from_pretrained(
         model_path,

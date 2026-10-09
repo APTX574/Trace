@@ -1147,7 +1147,7 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated label candidate keys in priority order.",
     )
     parser.add_argument("--video-key", type=str, default="video_path")
-    parser.add_argument("--include-dialogue", type=str2bool, default=True)
+    parser.add_argument("--include-dialogue", type=str2bool, default=False, help="Fast axis never consumes the dialogue transcript; kept only for ablation.")
 
     parser.add_argument("--prefix-step-sec", type=float, default=1.0)
     parser.add_argument("--min-prefix-sec", type=float, default=1.5)

@@ -1,5 +1,4 @@
 import argparse
-import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -43,24 +42,6 @@ def macro_f1(rows: List[Dict[str, Any]]) -> float:
         recall = tp / (tp + fn) if tp + fn else 0.0
         f1s.append(2 * precision * recall / (precision + recall) if precision + recall else 0.0)
     return safe_mean(f1s)
-
-
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames: List[str] = []
-    seen = set()
-    for row in rows:
-        for key in row.keys():
-            if key not in seen:
-                seen.add(key)
-                fieldnames.append(key)
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def load_fast_trajectory(path: str) -> Dict[str, Dict[str, Any]]:
@@ -236,7 +217,6 @@ def main() -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump({"model": model, "feature_names": feature_names, "labels": LABELS}, out_dir / f"router_{args.model_name}.joblib")
-    write_csv(out_dir / "threshold_search.csv", threshold_rows)
     summary = {
         "model_name": args.model_name,
         "feature_count": len(feature_names),
@@ -246,6 +226,7 @@ def main() -> None:
         "positive_rate_eval": safe_mean([float(v) for v in y_eval]),
         "router_binary_acc_at_0p5": float(accuracy_score(y_eval, (eval_scores >= 0.5).astype(np.int64))),
         "best": best,
+        "threshold_search": threshold_rows,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))

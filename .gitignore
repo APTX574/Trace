@@ -6,6 +6,7 @@ outputs/
 runs/
 checkpoints/
 *.joblib
+!assets/*.joblib
 *.pt
 *.pth
 *.safetensors

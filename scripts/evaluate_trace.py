@@ -3,15 +3,14 @@
 
 Given a trajectory_samples.jsonl (per-utterance prefix belief trajectories from
 build_fast_trajectory.py) and a slow eval JSONL (from run_slow_batch.py),
-computes Accuracy / Macro-F1 / Weighted-F1 / avg decision time /
-normalized decision ratio / slow call rate for the strategies:
+computes Accuracy / Macro-F1 / Weighted-F1 / slow call rate for the
+strategies:
     fast_only_first_1p5, always_full_fast, early_commit_wait_full,
     invoke_slow_when_needed, oracle_slow_trigger, slow_only.
-Outputs the same style of CSV and summary JSON as the paper artifacts.
+Outputs a summary JSON in the same style as the paper artifacts.
 """
 
 import argparse
-import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List
@@ -80,9 +79,6 @@ def evaluate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "accuracy": sum(r["correct"] for r in rows) / len(rows) if rows else 0.0,
         "macro_f1": macro_f1(rows),
         "weighted_f1": weighted_f1(rows),
-        "avg_decision_time": safe_mean([float(r.get("decision_time", 0.0)) for r in rows]),
-        "avg_video_length": safe_mean([float(r.get("video_length", 0.0)) for r in rows]),
-        "normalized_decision_ratio": safe_mean([float(r.get("normalized_decision_ratio", 0.0)) for r in rows]),
         "slow_call_rate": safe_mean([float(r.get("used_slow", 0.0)) for r in rows]),
     }
 
@@ -111,9 +107,8 @@ def build_rows(trajectories: List[Dict[str, Any]], slow_map: Dict[str, Any], arg
             continue
         gold = normalize_label(traj.get("gold", ""))
         slow = slow_map.get(str(traj.get("sample_id") or ""))
-        video_length = max(float(traj.get("clip_duration_sec", 0.0) or 0.0), 1e-6)
 
-        def add(name: str, pred: str, decision_time: float, used_slow: int):
+        def add(name: str, pred: str, used_slow: int):
             pred = normalize_label(pred)
             pred_final = pred if pred in LABELS else LABELS[0]
             out[name].append(
@@ -122,9 +117,6 @@ def build_rows(trajectories: List[Dict[str, Any]], slow_map: Dict[str, Any], arg
                     "gold": gold,
                     "pred": pred_final,
                     "correct": int(pred_final == gold),
-                    "decision_time": float(decision_time),
-                    "video_length": video_length,
-                    "normalized_decision_ratio": float(decision_time) / video_length,
                     "used_slow": used_slow,
                 }
             )
@@ -132,53 +124,35 @@ def build_rows(trajectories: List[Dict[str, Any]], slow_map: Dict[str, Any], arg
         fast_full = steps[-1]
         # 1) early commit at first 1.5s prefix
         first = steps[0]
-        add("fast_only_first_1p5", first["pred"], first["prefix_sec"], 0)
+        add("fast_only_first_1p5", first["pred"], 0)
         # 2) wait until full, no reinterpretation
-        add("always_full_fast", fast_full["pred"], fast_full["prefix_sec"], 0)
+        add("always_full_fast", fast_full["pred"], 0)
         # 3) adaptive commit (wait until reliability, else full)
         chosen = fast_full
         for step in steps:
             if should_commit(step, args.commit_conf, args.commit_margin, args.commit_entropy):
                 chosen = step
                 break
-        add("early_commit_wait_full", chosen["pred"], chosen["prefix_sec"], 0)
+        add("early_commit_wait_full", chosen["pred"], 0)
         # 4) adaptive commit + invoke slow when unreliable
         if not (chosen is fast_full and chosen == steps[-1]):
             chosen_fast = chosen
-            add("invoke_slow_when_needed", chosen_fast["pred"], chosen_fast["prefix_sec"], 0)
+            add("invoke_slow_when_needed", chosen_fast["pred"], 0)
         else:
             switch_count = sum(1 for i in range(1, len(steps)) if steps[i]["pred"] != steps[i - 1]["pred"])
             if slow and should_invoke_slow(fast_full, switch_count, args.slow_conf, args.slow_margin, args.slow_entropy, args.near_full_ratio):
-                add("invoke_slow_when_needed", slow["pred_label"], fast_full["prefix_sec"], 1)
+                add("invoke_slow_when_needed", slow["pred_label"], 1)
             else:
-                add("invoke_slow_when_needed", fast_full["pred"], fast_full["prefix_sec"], 0)
+                add("invoke_slow_when_needed", fast_full["pred"], 0)
         # 5) oracle (use slow when it corrects the fast error)
         if slow and fast_full["pred"] != gold and slow["pred_label"] == gold:
-            add("oracle_slow_trigger", slow["pred_label"], fast_full["prefix_sec"], 1)
+            add("oracle_slow_trigger", slow["pred_label"], 1)
         else:
-            add("oracle_slow_trigger", fast_full["pred"], fast_full["prefix_sec"], 0)
+            add("oracle_slow_trigger", fast_full["pred"], 0)
         # 6) slow always
         if slow:
-            add("slow_only", slow["pred_label"], fast_full["prefix_sec"], 1)
+            add("slow_only", slow["pred_label"], 1)
     return out
-
-
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames: List[str] = []
-    seen = set()
-    for row in rows:
-        for k in row.keys():
-            if k not in seen:
-                seen.add(k)
-                fieldnames.append(k)
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def main() -> None:
@@ -216,12 +190,12 @@ def main() -> None:
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_csv(out_dir / f"strategy_delay_metrics_{args.target_space}.csv", metric_rows)
 
-    with (out_dir / f"summary_{args.target_space}.json").open("w", encoding="utf-8") as f:
+    summary_path = out_dir / f"summary_{args.target_space}.json"
+    with summary_path.open("w", encoding="utf-8") as f:
         json.dump({"target_space": args.target_space, "metrics": metric_rows, "trajectory": len(trajectories), "slow_map": len(slow_map)}, f, ensure_ascii=False, indent=2)
 
-    print(json.dumps({"target_space": args.target_space, "metrics": metric_rows, "outputs": {"csv": str(out_dir / f"strategy_delay_metrics_{args.target_space}.csv")}}, ensure_ascii=False, indent=2))
+    print(json.dumps({"target_space": args.target_space, "metrics": metric_rows, "outputs": {"summary": str(summary_path)}}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

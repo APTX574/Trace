@@ -67,17 +67,16 @@ def build_slow_prompt(sample: Dict[str, Any], labels: List[str]) -> str:
     nxt = first_text([sample.get("next_video_path")])
     lines = [
         "Task: predict the target speaker's emotion in the current clip.",
-        "You may receive up to four multimodal inputs in this order:",
+        "You may receive up to three multimodal inputs in this order:",
         "1. optional previous-context audio",
         "2. the current target audio clip",
         "3. the current target video clip",
-        "4. optional next-context audio",
         "The current target audio and current target video describe the same clip and are the primary evidence.",
         "Prioritize the current target audio when judging subtle emotions, especially prosody, speaking rate, pauses, intensity, breathiness, pitch movement, trembling, laughter, crying, sighs, and voice quality changes.",
         "Use the current target video to verify or refine the emotion from facial expression, gaze, posture, and visible interaction context.",
-        "The previous and next audios are auxiliary context only.",
-        "Use previous or next audio only to resolve ambiguity in the current clip, never as the main basis for prediction.",
-        "Never predict the emotion of the previous or next clip.",
+        "The previous-context audio is auxiliary context only.",
+        "Use previous-context audio only to resolve ambiguity in the current clip, never as the main basis for prediction.",
+        "Never predict the emotion of the previous clip.",
         f"Valid emotion labels: {labels_str}.",
         "Return the final emotion label for the current clip.",
         "Do not output whether correction is needed.",
@@ -85,8 +84,6 @@ def build_slow_prompt(sample: Dict[str, Any], labels: List[str]) -> str:
     ]
     if not prev:
         lines.append("There is no valid previous-context audio for this sample. Do not infer missing context that is not provided.")
-    if not nxt:
-        lines.append("There is no valid next-context audio for this sample. Do not assume future evidence beyond the target clip.")
     lines += [
         f"Target speaker in the current clip: {speaker}.",
         f'Current dialogue: "{dialogue}".',
@@ -106,7 +103,7 @@ def build_inputs(processor, sample: Dict[str, Any], prompt_text: str, fps: int, 
     content: List[Dict[str, Any]] = []
     prev = first_text([sample.get("previous_video_path")])
     cur = first_text([sample.get("current_video_path")])
-    nxt = first_text([sample.get("next_video_path")])
+    nxt = ""  # next-context audio is not used by the released slow axis
     if prev and os.path.exists(prev):
         content.append({"type": "audio", "audio": prev})
     if cur and os.path.exists(cur):
