@@ -9,6 +9,7 @@ Official open-source release for the paper
 > **[EMNLP 2026 — accepted]**
 >
 > Paper: <https://arxiv.org/abs/2608.26786>
+> 
 > Model: <https://drive.google.com/file/d/1Onorc5Z-C754C-x6uVyyw2gOLZO3Md5y/view?usp=sharing>
 > 
 
